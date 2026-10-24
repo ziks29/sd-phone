@@ -43,9 +43,13 @@ export function Homes({ onClose: _onClose }: { onClose: () => void }) {
         refetch();
     }, [refetch]));
     const homes = list?.homes ?? (isFiveM ? [] : HOMES);
-    const propertyForm = new Intl.PluralRules(getLocaleTag()).select(homes.length);
     const pluralProperties = t('homes.properties', 'properties');
     const fewProperties = t('homes.propertiesFew', 'properties');
+    // Only catalogs with a dedicated few form opt into locale plural rules.
+    // Existing catalogs retain their original count === 1 singular behavior.
+    const propertyForm = fewProperties !== 'properties'
+        ? new Intl.PluralRules(getLocaleTag()).select(homes.length)
+        : homes.length === 1 ? 'one' : 'other';
     const propertyLabel = propertyForm === 'one'
         ? t('homes.property', 'property')
         // Catalogs without a separate few form retain their existing localized plural.

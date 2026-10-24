@@ -13,7 +13,7 @@ import { PromptDialog } from '@/ui/PromptDialog';
 import { EmptyState } from '@/ui/EmptyState';
 import { NavBar } from '@/ui/NavBar';
 import { HOMES, DEV_CAPS, type Home, type HomesCaps, type KeyHolder } from './data';
-import { t } from '@/i18n';
+import { getLocaleTag, t } from '@/i18n';
 import { Pill } from '@/ui/Pill';
 import { StatusBarSpacer } from '@/ui/StatusBarSpacer';
 
@@ -43,6 +43,15 @@ export function Homes({ onClose: _onClose }: { onClose: () => void }) {
         refetch();
     }, [refetch]));
     const homes = list?.homes ?? (isFiveM ? [] : HOMES);
+    const propertyForm = new Intl.PluralRules(getLocaleTag()).select(homes.length);
+    const pluralProperties = t('homes.properties', 'properties');
+    const fewProperties = t('homes.propertiesFew', 'properties');
+    const propertyLabel = propertyForm === 'one'
+        ? t('homes.property', 'property')
+        // Catalogs without a separate few form retain their existing localized plural.
+        : propertyForm === 'few' && fewProperties !== 'properties'
+            ? fewProperties
+            : pluralProperties;
 
     const open = homes.find(h => h.id === openId) ?? null;
 
@@ -65,7 +74,7 @@ export function Homes({ onClose: _onClose }: { onClose: () => void }) {
 
             <div className="px-5 pb-2 pt-1">
                 <h1 className="text-[32px] font-bold tracking-tight text-black dark:text-white">{t('homes.title','Homes')}</h1>
-                <p className="mt-1 text-[18px] font-medium text-ios-gray">{homes.length} {homes.length === 1 ? t('homes.property','property') : t('homes.properties','properties')}</p>
+                <p className="mt-1 text-[18px] font-medium text-ios-gray">{homes.length} {propertyLabel}</p>
             </div>
 
             {loading && homes.length === 0 ? null : homes.length === 0 ? (

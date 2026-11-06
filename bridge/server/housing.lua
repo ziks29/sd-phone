@@ -8,6 +8,8 @@ local framework = require 'bridge.shared.framework'
 ---(configs/uniqueandsim.lua) that one is rewrapped to return the acting SIM identity, and the
 ---resources called below key their records by citizenid.
 local player = require 'bridge.server.player'
+---@type table|nil AI Core helpers (bridge.server.aicore): character ids and names; nil on every other framework.
+local aicore = framework.aicore and require 'bridge.server.aicore' or nil
 
 ---@type table Housing bridge module; the table returned at end of file. Abstracts the supported
 ---housing systems behind one normalised property list plus capability-gated actions (lock / key
@@ -131,6 +133,8 @@ local function offlineName(cid)
             local last  = s(r.lastname)
             if first or last then return (first or '') .. ' ' .. (last or '') end
         end
+    elseif aicore then
+        return aicore.name(cid)
     else
         local ok, rows = pcall(function()
             return MySQL.query.await(
@@ -735,6 +739,49 @@ ADAPTERS['qbx_properties'] = function(source, id)
     return out
 end
 
+---ai-properties' property definitions from its admin-panel content file: `{ [propertyId] = { label,
+---door, interior, price } }`. Empty when the file is missing or unreadable.
+---@return table<string, table>
+local function aiPropertyDefs()
+    local raw = LoadResourceFile('ai-properties', 'data/properties.json')
+    local ok, data = pcall(json.decode, raw or '')
+    if not ok or type(data) ~= 'table' then return {} end
+    data['$schema'] = nil
+    return data
+end
+
+---ai-properties (AI Core): it has no exports, and its tables are its documented interface, so
+---ownership comes from `ai_properties_owned`, keyed by AI Core's character id (resolved from the
+---citizenid through ai-core), and the address, door and price from its property definitions.
+---@param source number caller server id
+---@param id string caller citizenid
+---@return table[] homes
+ADAPTERS['ai-properties'] = function(source, id)
+    local charId = aicore and aicore.charId(id)
+    if not charId then return {} end
+
+    local rows = dbQuery('SELECT `property`, `price` FROM `ai_properties_owned` WHERE `char_id` = ?', { charId })
+    if not rows then return {} end
+
+    local defs = aiPropertyDefs()
+    local out = {}
+    for _, r in ipairs(rows) do
+        local def = type(defs[r.property]) == 'table' and defs[r.property] or {}
+        local coords = coordsFrom(def, 'door')
+        local zone = coords and clientExec(source, 'zone', coords)
+        local apartment = tostring(r.property):lower():find('apart', 1, true)
+        out[#out + 1] = home{
+            id      = r.property,
+            address = s(def.label) or tostring(r.property),
+            type    = apartment and 'Apartment' or 'House',
+            area    = type(zone) == 'string' and zone or '',
+            value   = r.price or def.price,
+            coords  = coords,
+        }
+    end
+    return out
+end
+
 -- Capability map: which detail-view actions each system supports.
 ---@type table<string, { lock: boolean, keyList: boolean, keyManage: boolean }> Per-system action support.
 local CAPS = {
@@ -751,6 +798,7 @@ local CAPS = {
     ['nolag_properties'] = { lock = true,  keyList = true,  keyManage = true  },
     ['kartik-properties'] = { lock = true,  keyList = true,  keyManage = true  },
     ['qbx_properties'] = { lock = false, keyList = true,  keyManage = false },
+    ['ai-properties']  = { lock = false, keyList = true,  keyManage = false },
 }
 
 ---Capability flags for the active system, all-false when none is detected.
@@ -985,6 +1033,14 @@ function housing.keyHolders(src, id)
         if not ownsProperty(src, id) then return {} end
         local rows = dbQuery('SELECT `keyholders` FROM `properties` WHERE `id` = ?', { p })
         return resolveCids(decodeJson(rows and rows[1] and rows[1].keyholders))
+    elseif ACTIVE == 'ai-properties' then
+        if not ownsProperty(src, id) then return {} end
+        local holders = {}
+        for _, r in ipairs(dbQuery('SELECT `char_id`, `name` FROM `ai_properties_keys` WHERE `property` = ?', { tostring(id) }) or {}) do
+            local cid = aicore and aicore.citizenId(r.char_id)
+            if cid then holders[#holders + 1] = { citizenid = cid, name = r.name } end
+        end
+        return resolveCids(holders)
     end
     return {}
 end
